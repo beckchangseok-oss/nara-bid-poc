@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import requests
 
@@ -69,13 +71,21 @@ def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 6
         try:
             response = session.get(file_url, timeout=timeout)
             response.raise_for_status()
+
+            resolved_name = file_name
+            if file_name.startswith("prespec_attachment_") or "." not in file_name:
+                header_name = _extract_filename_from_headers(response)
+                if header_name:
+                    resolved_name = _safe_name(header_name)
+
+            target_path = target_dir / resolved_name
             target_path.write_bytes(response.content)
 
             results.append(
                 {
                     "record_id": record_id,
                     "seq": job["seq"],
-                    "file_name": file_name,
+                    "file_name": resolved_name,
                     "file_url": file_url,
                     "local_path": str(target_path),
                     "status": "DOWNLOADED",
@@ -96,3 +106,27 @@ def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 6
             )
 
     return results
+
+def _extract_filename_from_headers(response: requests.Response) -> str:
+    content_disposition = response.headers.get("Content-Disposition", "")
+    if "filename=" in content_disposition:
+        filename = content_disposition.split("filename=")[-1].strip().strip('"').strip("'")
+        return unquote(filename)
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "pdf" in content_type:
+        return "downloaded_file.pdf"
+    if "hwp" in content_type:
+        return "downloaded_file.hwp"
+    if "officedocument.wordprocessingml.document" in content_type:
+        return "downloaded_file.docx"
+    if "msword" in content_type:
+        return "downloaded_file.doc"
+    if "spreadsheetml" in content_type:
+        return "downloaded_file.xlsx"
+    if "ms-excel" in content_type:
+        return "downloaded_file.xls"
+    if "zip" in content_type:
+        return "downloaded_file.zip"
+
+    return ""
