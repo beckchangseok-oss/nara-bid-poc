@@ -63,6 +63,13 @@ ADJACENT_SCORE_MAP = {
     "환자경험": 10,
     "통계시스템": 10,
     "통계플랫폼": 10,
+    "정보시스템": 10,
+    "시스템 개선": 10,
+    "시스템개선": 10,
+    "시스템 구축": 10,
+    "시스템구축": 10,
+    "db구축": 10,
+    "db 구축": 10,
     "분석 서버": 10,
     "서버 전환": 12,
 }
@@ -111,6 +118,53 @@ EXCLUDE_SCORE_MAP = {
     "알약": -25,
     "acrobat": -25,
 }
+
+DIRECT_STRONG_TERMS = [
+    "aml",
+    "데이터분석",
+    "데이터 분석",
+    "통계분석",
+    "통계 분석",
+    "분석 플랫폼",
+    "분석플랫폼",
+    "통계프로그램",
+    "통계패키지",
+]
+
+DIRECT_LICENSE_TERMS = [
+    "sas",
+    "aml",
+    "데이터분석",
+    "데이터 분석",
+    "통계분석",
+    "통계 분석",
+    "분석 플랫폼",
+    "분석플랫폼",
+    "통계프로그램",
+    "통계패키지",
+    "csv",
+]
+
+ADJACENT_LICENSE_TERMS = [
+    "ai",
+    "클라우드",
+    "db 전환",
+    "cx",
+    "voc",
+    "nps",
+    "dxa",
+]
+
+BID_SERVICE_ADJACENT_TERMS = [
+    "정보시스템",
+    "시스템 개선",
+    "시스템개선",
+    "시스템 구축",
+    "시스템구축",
+    "db구축",
+    "db 구축",
+    "고도화",
+]
 
 
 def get_default_date_range(lookback_days: int) -> tuple[str, str]:
@@ -169,12 +223,31 @@ def has_exact_sas(text: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def has_license_context(text: str) -> bool:
+def has_contextual_license_match(text: str, terms: list[str]) -> bool:
+    escaped_terms = "|".join(
+        sorted((re.escape(term) for term in terms), key=len, reverse=True)
+    )
     patterns = [
-        r"(sas|aml|통계|통계분석|데이터분석|분석\s*플랫폼|분석플랫폼|ai|cx|voc|nps|dxa|db\s*전환).{0,20}(라이선스|임차|구매|리뉴얼)",
-        r"(라이선스|임차|구매|리뉴얼).{0,20}(sas|aml|통계|통계분석|데이터분석|분석\s*플랫폼|분석플랫폼|ai|cx|voc|nps|dxa|db\s*전환)",
+        rf"({escaped_terms}).{{0,20}}(라이선스|임차|구매|리뉴얼)",
+        rf"(라이선스|임차|구매|리뉴얼).{{0,20}}({escaped_terms})",
     ]
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def has_direct_license_context(text: str) -> bool:
+    return has_contextual_license_match(text, DIRECT_LICENSE_TERMS)
+
+
+def has_adjacent_license_context(text: str) -> bool:
+    return has_contextual_license_match(text, ADJACENT_LICENSE_TERMS)
+
+
+def has_bid_service_adjacent_context(item: dict[str, Any], text: str) -> bool:
+    if item.get("_source_kind") != "bid":
+        return False
+    if item.get("_source_type") != "service":
+        return False
+    return any(term in text for term in BID_SERVICE_ADJACENT_TERMS)
 
 
 def count_generic_software_hits(text: str) -> int:
@@ -256,6 +329,15 @@ def build_prespec_ppssrch_params(keyword: str, start_dt: str, end_dt: str) -> di
     }
 
 
+def build_bid_detail_params(bid_ntce_no: str) -> dict[str, Any]:
+    return {
+        "inqryDiv": "2",
+        "bidNtceNo": bid_ntce_no,
+        "pageNo": 1,
+        "numOfRows": 10,
+    }
+
+
 def normalize_bid_item(item: dict[str, Any], source_type: str, query_track: str, keyword: str) -> dict[str, Any]:
     normalized = dict(item)
     normalized["_source_kind"] = "bid"
@@ -327,7 +409,9 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
 
     exact_sas = has_exact_sas(text)
-    license_context = has_license_context(text)
+    direct_license_context = has_direct_license_context(text)
+    adjacent_license_context = has_adjacent_license_context(text)
+    bid_service_adjacent_context = has_bid_service_adjacent_context(item, text)
     generic_sw_hits = count_generic_software_hits(text)
     generic_hw_goods = is_generic_hardware_goods(item, text)
 
@@ -335,9 +419,17 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
         total_score += 50
         reasons.append("EXACT_SAS=Y")
 
-    if license_context:
+    if direct_license_context:
         total_score += 10
-        reasons.append("LICENSE_CONTEXT=Y")
+        reasons.append("DIRECT_LICENSE_CONTEXT=Y")
+
+    if adjacent_license_context:
+        total_score += 4
+        reasons.append("ADJ_LICENSE_CONTEXT=Y")
+
+    if bid_service_adjacent_context:
+        total_score += 10
+        reasons.append("BID_SERVICE_SYSTEM_CONTEXT=Y")
 
     if str(item.get("swBizObjYn", "")).strip().upper() == "Y":
         total_score += 4
@@ -370,34 +462,23 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     if exclude_hits:
         reasons.append(f"EXCLUDE={','.join(exclude_hits[:5])}")
 
-    has_strong_direct = exact_sas or any(
-        term in text
-        for term in [
-            "aml",
-            "데이터분석",
-            "통계분석",
-            "분석 플랫폼",
-            "분석플랫폼",
-            "통계프로그램",
-            "통계패키지",
-        ]
-    )
+    has_strong_direct = exact_sas or any(term in text for term in DIRECT_STRONG_TERMS)
 
-    has_business_fit = has_strong_direct or license_context
+    has_adjacent_business = (
+        adjacent_score > 0
+        or sector_score > 0
+        or adjacent_license_context
+        or bid_service_adjacent_context
+        or item.get("_source_kind") == "prespec"
+    )
 
     if exclude_score <= -80 and not exact_sas and not has_strong_direct:
         label = "Exclude"
     elif exact_sas:
         label = "Direct"
-    elif has_business_fit and total_score >= 20:
+    elif has_strong_direct and (direct_license_context or total_score >= 25):
         label = "Direct"
-    elif total_score >= 10 and (
-        adjacent_score > 0
-        or sector_score > 0
-        or "통계시스템" in text
-        or "통계플랫폼" in text
-        or item.get("_source_kind") == "prespec"
-    ):
+    elif total_score >= 10 and has_adjacent_business:
         label = "Adjacent"
     else:
         label = "Exclude"
@@ -450,6 +531,50 @@ def merge_item(base: dict[str, Any], new_item: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
+def merge_bid_detail_into_prespec(prespec_item: dict[str, Any], bid_item: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(prespec_item)
+
+    for field in [
+        "bidNtceNo",
+        "bidNtceOrd",
+        "bidNtceDt",
+        "bidClseDt",
+        "opengDt",
+        "bidNtceDtlUrl",
+        "bidNtceUrl",
+        "presmptPrce",
+        "asignBdgtAmt",
+        "srvceDivNm",
+        "purchsObjPrdctList",
+        "infoBizYn",
+        "pubPrcrmntClsfcNm",
+        "pubPrcrmntMidclsfcNm",
+        "pubPrcrmntLrgclsfcNm",
+    ]:
+        if not merged.get(field) and bid_item.get(field):
+            merged[field] = bid_item[field]
+
+    for i in range(1, 11):
+        file_name_field = f"ntceSpecFileNm{i}"
+        file_url_field = f"ntceSpecDocUrl{i}"
+
+        if not merged.get(file_name_field) and bid_item.get(file_name_field):
+            merged[file_name_field] = bid_item[file_name_field]
+        if not merged.get(file_url_field) and bid_item.get(file_url_field):
+            merged[file_url_field] = bid_item[file_url_field]
+
+    linked_bid_nos = set(merged.get("_linked_bid_ntce_nos", []))
+    bid_no = str(bid_item.get("bidNtceNo", "")).strip()
+    if bid_no:
+        linked_bid_nos.add(bid_no)
+    merged["_linked_bid_ntce_nos"] = sorted(x for x in linked_bid_nos if x)
+
+    if bid_item.get("bidNtceDtlUrl") and not merged.get("_detail_url"):
+        merged["_detail_url"] = str(bid_item.get("bidNtceDtlUrl", "")).strip()
+
+    return merged
+
+
 def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     deduped: dict[str, dict[str, Any]] = {}
 
@@ -463,6 +588,106 @@ def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             deduped[key] = merge_item(deduped[key], item)
 
     return list(deduped.values())
+
+
+def extract_bid_ntce_numbers(item: dict[str, Any]) -> list[str]:
+    raw_value = str(item.get("bidNtceNoList", "")).strip()
+    if not raw_value:
+        return []
+
+    numbers: list[str] = []
+    for part in raw_value.split(","):
+        value = part.strip()
+        if value:
+            numbers.append(value)
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in numbers:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+
+    return result
+
+
+def fetch_bid_detail_by_no(
+    client: PublicApiClient,
+    bid_ntce_no: str,
+    source_type: str,
+) -> dict[str, Any] | None:
+    if source_type == "service":
+        endpoint = BID_ENDPOINTS["service_pps"]
+    else:
+        endpoint = BID_ENDPOINTS["goods_pps"]
+
+    params = build_bid_detail_params(bid_ntce_no=bid_ntce_no)
+    response_json = client.fetch(endpoint=endpoint, params=params)
+    items = extract_items(response_json)
+    if not items:
+        return None
+    return items[0]
+
+
+def enrich_prespec_with_bid_details(
+    items: list[dict[str, Any]],
+    bid_client: PublicApiClient,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    enriched_items: list[dict[str, Any]] = []
+    enrich_logs: list[dict[str, Any]] = []
+
+    for item in items:
+        if item.get("_source_kind") != "prespec":
+            enriched_items.append(item)
+            continue
+
+        if item.get("_label") not in {"Direct", "Adjacent"}:
+            enriched_items.append(item)
+            continue
+
+        bid_numbers = extract_bid_ntce_numbers(item)
+        if not bid_numbers:
+            enriched_items.append(item)
+            continue
+
+        enriched = dict(item)
+        for bid_no in bid_numbers:
+            try:
+                bid_detail = fetch_bid_detail_by_no(
+                    client=bid_client,
+                    bid_ntce_no=bid_no,
+                    source_type=str(item.get("_source_type", "goods")),
+                )
+                if bid_detail:
+                    enriched = merge_bid_detail_into_prespec(enriched, bid_detail)
+                    enrich_logs.append(
+                        {
+                            "prespec_record_id": item.get("_record_id"),
+                            "bid_ntce_no": bid_no,
+                            "status": "MERGED",
+                        }
+                    )
+                else:
+                    enrich_logs.append(
+                        {
+                            "prespec_record_id": item.get("_record_id"),
+                            "bid_ntce_no": bid_no,
+                            "status": "NOT_FOUND",
+                        }
+                    )
+            except Exception as exc:
+                enrich_logs.append(
+                    {
+                        "prespec_record_id": item.get("_record_id"),
+                        "bid_ntce_no": bid_no,
+                        "status": "ERROR",
+                        "error": str(exc),
+                    }
+                )
+
+        enriched_items.append(enriched)
+
+    return enriched_items, enrich_logs
 
 
 def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
@@ -484,6 +709,22 @@ def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
                 }
             )
     else:
+        bid_attachment_added = False
+        for i in range(1, 11):
+            file_name = str(item.get(f"ntceSpecFileNm{i}", "")).strip()
+            file_url = str(item.get(f"ntceSpecDocUrl{i}", "")).strip()
+            if not file_url:
+                continue
+            bid_attachment_added = True
+            jobs.append(
+                {
+                    "record_id": record_id,
+                    "seq": f"bid_{i}",
+                    "file_name": file_name or f"linked_bid_attachment_{i}",
+                    "file_url": file_url,
+                }
+            )
+
         for i in range(1, 6):
             file_url = str(item.get(f"specDocFileUrl{i}", "")).strip()
             if not file_url:
@@ -491,7 +732,7 @@ def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
             jobs.append(
                 {
                     "record_id": record_id,
-                    "seq": str(i),
+                    "seq": str(i) if not bid_attachment_added else f"prespec_{i}",
                     "file_name": f"prespec_attachment_{i}",
                     "file_url": file_url,
                 }
@@ -521,6 +762,9 @@ def attachment_priority(item: dict[str, Any]) -> int:
 
     if is_generic_hardware_goods(item, text) and not has_exact_sas(text):
         score -= 30
+
+    if item.get("_linked_bid_ntce_nos"):
+        score += 12
 
     return score
 
@@ -685,6 +929,11 @@ def collect_bid_notices(
         item["_reasons"] = " | ".join(result["reasons"])
         scored_items.append(item)
 
+    scored_items, enrich_logs = enrich_prespec_with_bid_details(
+        items=scored_items,
+        bid_client=bid_client,
+    )
+
     direct_items = [x for x in scored_items if x["_label"] == "Direct"]
     adjacent_items = [x for x in scored_items if x["_label"] == "Adjacent"]
     excluded_items = [x for x in scored_items if x["_label"] == "Exclude"]
@@ -743,6 +992,12 @@ def collect_bid_notices(
         "direct_count": len(direct_items),
         "adjacent_count": len(adjacent_items),
         "exclude_count": len(excluded_items),
+        "enrich_summary": {
+            "attempted": len(enrich_logs),
+            "merged": sum(1 for x in enrich_logs if x.get("status") == "MERGED"),
+            "not_found": sum(1 for x in enrich_logs if x.get("status") == "NOT_FOUND"),
+            "error": sum(1 for x in enrich_logs if x.get("status") == "ERROR"),
+        },
         "attachment_policy": {
             "direct_all": True,
             "adjacent_prespec_service_top_n": 20,
@@ -751,6 +1006,7 @@ def collect_bid_notices(
             "adjacent_bid_goods": "skip",
         },
         "calls": manifest_calls,
+        "prespec_bid_enrichment_logs": enrich_logs,
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
