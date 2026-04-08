@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 from app.config import DB_PATH, PROJECT_ROOT
@@ -58,29 +57,26 @@ def finish_run(
 
 def insert_notices(run_id: int, notices: list[dict[str, Any]], raw_json_path: str) -> None:
     rows = []
+
     for item in notices:
+        primary_no = str(
+            item.get("_primary_id")
+            or item.get("bidNtceNo")
+            or item.get("bfSpecRgstNo")
+            or ""
+        )
+        primary_ord = str(item.get("_sub_id") or item.get("bidNtceOrd") or "")
+
         rows.append(
             (
                 run_id,
-                str(item.get("bidNtceNo", "")),
-                str(item.get("bidNtceOrd", "")),
-                str(
-                    item.get("bidNtceNm", "")
-                    or item.get("ntceNm", "")
-                    or item.get("title", "")
-                ),
-                str(
-                    item.get("dminsttNm", "")
-                    or item.get("dmndInsttNm", "")
-                    or item.get("demandOrgNm", "")
-                ),
-                str(item.get("ntceInsttNm", "") or item.get("pubOrgNm", "")),
-                str(
-                    item.get("bidClseDt", "")
-                    or item.get("clseDt", "")
-                    or item.get("closeDt", "")
-                ),
-                str(item.get("bidNtceDtlUrl", "") or item.get("noticeUrl", "")),
+                primary_no,
+                primary_ord,
+                str(item.get("_title", "") or item.get("bidNtceNm", "") or item.get("prdctClsfcNoNm", "")),
+                str(item.get("_demand_org", "") or item.get("dminsttNm", "") or item.get("rlDminsttNm", "")),
+                str(item.get("_pub_org", "") or item.get("ntceInsttNm", "") or item.get("orderInsttNm", "")),
+                str(item.get("_close_dt", "") or item.get("bidClseDt", "") or item.get("opninRgstClseDt", "")),
+                str(item.get("_detail_url", "") or item.get("bidNtceDtlUrl", "") or item.get("bidNtceUrl", "")),
                 raw_json_path,
                 "COLLECTED",
                 json.dumps(item, ensure_ascii=False),
