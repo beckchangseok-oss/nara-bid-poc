@@ -72,6 +72,18 @@ def _ensure_suffix(file_name: str, suffix: str) -> str:
         return file_name
     return f"{file_name}{suffix}"
 
+def _build_retry_path(target_path):
+    parent = target_path.parent
+    stem = target_path.stem
+    suffix = target_path.suffix
+
+    for i in range(1, 6):
+        candidate = parent / f"{stem}__retry{i}{suffix}"
+        if not candidate.exists():
+            return candidate
+
+    return parent / f"{stem}__retry_final{suffix}"
+
 
 def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 60) -> list[dict[str, Any]]:
     ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -122,7 +134,13 @@ def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 6
                     resolved_name = _ensure_suffix(file_name, detected_ext)
 
             target_path = target_dir / resolved_name
-            target_path.write_bytes(response.content)
+
+            try:
+                target_path.write_bytes(response.content)
+            except PermissionError:
+                retry_path = _build_retry_path(target_path)
+                retry_path.write_bytes(response.content)
+                target_path = retry_path
 
             results.append(
                 {
