@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
-
-
 
 from app.clients.bid_api import PublicApiClient
 from app.config import BID_ENDPOINTS, PRESPEC_ENDPOINTS, RAW_DIR, Settings
@@ -16,15 +13,14 @@ DIRECT_QUERY_KEYWORDS = [
     "AML",
     "통계",
     "데이터분석",
+    "통계분석",
     "CSV",
-    "라이선스",
     "리뉴얼",
     "분석 플랫폼",
 ]
 
 ADJACENT_QUERY_KEYWORDS = [
     "AI",
-    "서버",
     "클라우드",
     "빅데이터",
     "DB 전환",
@@ -32,28 +28,30 @@ ADJACENT_QUERY_KEYWORDS = [
     "VOC",
     "NPS",
     "환자경험",
+    "서버 전환",
+    "분석 서버",
 ]
 
 DIRECT_SCORE_MAP = {
     "aml": 35,
-    "통계": 18,
-    "데이터분석": 22,
+    "통계": 14,
     "통계분석": 22,
+    "데이터분석": 22,
+    "통계패키지": 18,
+    "통계프로그램": 18,
     "분석 플랫폼": 16,
     "분석플랫폼": 16,
     "csv": 10,
     "리뉴얼": 10,
     "renewal": 10,
-    "교육": 6,
-    "운영": 6,
-    "위탁": 6,
+    "교육": 4,
+    "운영": 4,
+    "위탁": 4,
 }
 
 ADJACENT_SCORE_MAP = {
     "ai": 10,
     "agentic ai": 14,
-    "서버": 8,
-    "서버 전환": 12,
     "클라우드": 8,
     "빅데이터": 10,
     "데이터 플랫폼": 10,
@@ -63,6 +61,10 @@ ADJACENT_SCORE_MAP = {
     "nps": 8,
     "dxa": 8,
     "환자경험": 10,
+    "통계시스템": 10,
+    "통계플랫폼": 10,
+    "분석 서버": 10,
+    "서버 전환": 12,
 }
 
 SECTOR_SCORE_MAP = {
@@ -107,6 +109,7 @@ EXCLUDE_SCORE_MAP = {
     "한컴": -25,
     "v3": -25,
     "알약": -25,
+    "acrobat": -25,
 }
 
 
@@ -153,6 +156,7 @@ def score_by_map(text: str, score_map: dict[str, int]) -> tuple[int, list[str]]:
 
     return score, hits
 
+
 def has_exact_sas(text: str) -> bool:
     patterns = [
         r"(?<![a-z0-9])sas(?![a-z0-9])",
@@ -165,20 +169,69 @@ def has_exact_sas(text: str) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def has_exact_license_context(text: str) -> bool:
-    context_patterns = [
-        r"(sas|aml|통계|데이터분석|통계분석|분석\s*플랫폼|ai|cx|voc|nps|dxa|db\s*전환).{0,20}(라이선스|임차|구매|리뉴얼)",
-        r"(라이선스|임차|구매|리뉴얼).{0,20}(sas|aml|통계|데이터분석|통계분석|분석\s*플랫폼|ai|cx|voc|nps|dxa|db\s*전환)",
+def has_license_context(text: str) -> bool:
+    patterns = [
+        r"(sas|aml|통계|통계분석|데이터분석|분석\s*플랫폼|분석플랫폼|ai|cx|voc|nps|dxa|db\s*전환).{0,20}(라이선스|임차|구매|리뉴얼)",
+        r"(라이선스|임차|구매|리뉴얼).{0,20}(sas|aml|통계|통계분석|데이터분석|분석\s*플랫폼|분석플랫폼|ai|cx|voc|nps|dxa|db\s*전환)",
     ]
-    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in context_patterns)
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
 def count_generic_software_hits(text: str) -> int:
     generic_terms = [
-        "zoom", "teams", "microsoft 365", "office 365", "ms ovs",
-        "한글과컴퓨터", "한컴", "v3", "알약", "acrobat"
+        "zoom",
+        "teams",
+        "microsoft 365",
+        "office 365",
+        "ms ovs",
+        "한글과컴퓨터",
+        "한컴",
+        "v3",
+        "알약",
+        "acrobat",
     ]
-    return sum(1 for term in generic_terms if term.lower() in text.lower())
+    return sum(1 for term in generic_terms if term in text.lower())
+
+
+def is_generic_hardware_goods(item: dict[str, Any], text: str) -> bool:
+    if item.get("_source_kind") != "bid":
+        return False
+    if item.get("_source_type") != "goods":
+        return False
+
+    hardware_terms = [
+        "서버",
+        "gpu",
+        "gpu서버",
+        "gpu 서버",
+        "워크스테이션",
+        "맥북",
+        "맥북프로",
+        "노트북",
+        "pc",
+        "모니터",
+        "장비",
+    ]
+    business_terms = [
+        "sas",
+        "aml",
+        "통계",
+        "통계분석",
+        "데이터분석",
+        "분석 플랫폼",
+        "분석플랫폼",
+        "라이선스",
+        "소프트웨어",
+        "sw",
+        "db",
+        "클라우드",
+        "ai 플랫폼",
+    ]
+
+    has_hardware = any(term in text for term in hardware_terms)
+    has_business_context = any(term in text for term in business_terms)
+
+    return has_hardware and not has_business_context
 
 
 def build_bid_ppssrch_params(keyword: str, start_dt: str, end_dt: str) -> dict[str, Any]:
@@ -250,7 +303,8 @@ def build_text(item: dict[str, Any]) -> str:
         str(item.get("purchsObjPrdctList", "")),
         str(item.get("prdctDtlList", "")),
         str(item.get("bidNtceNoList", "")),
-        str(item.get("_query_keyword", "")),
+        str(item.get("bidNtceNo", "")),
+        str(item.get("bfSpecRgstNo", "")),
     ]
 
     for i in range(1, 11):
@@ -273,8 +327,9 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
 
     exact_sas = has_exact_sas(text)
-    license_context = has_exact_license_context(text)
+    license_context = has_license_context(text)
     generic_sw_hits = count_generic_software_hits(text)
+    generic_hw_goods = is_generic_hardware_goods(item, text)
 
     if exact_sas:
         total_score += 50
@@ -284,19 +339,27 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
         total_score += 10
         reasons.append("LICENSE_CONTEXT=Y")
 
-    # swBizObjYn 은 참고 신호만 사용
     if str(item.get("swBizObjYn", "")).strip().upper() == "Y":
         total_score += 4
         reasons.append("SW=Y")
 
-    # direct query로 잡힌 건 약한 보조점수만
     if item.get("_query_track") == "direct":
         total_score += 2
 
-    # 범용SW 다수 포함 시 강하게 내림
+    if item.get("_source_kind") == "prespec" and item.get("_source_type") == "service":
+        total_score += 15
+        reasons.append("PRESPEC_SERVICE=Y")
+    elif item.get("_source_kind") == "prespec":
+        total_score += 6
+        reasons.append("PRESPEC=Y")
+
     if generic_sw_hits > 0 and not exact_sas:
         total_score -= 20
         reasons.append(f"GENERIC_SW={generic_sw_hits}")
+
+    if generic_hw_goods and not exact_sas:
+        total_score -= 35
+        reasons.append("GENERIC_HARDWARE_GOODS=Y")
 
     if direct_hits:
         reasons.append(f"DIRECT={','.join(direct_hits[:5])}")
@@ -308,18 +371,33 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
         reasons.append(f"EXCLUDE={','.join(exclude_hits[:5])}")
 
     has_strong_direct = exact_sas or any(
-        k in text for k in ["aml", "데이터분석", "통계분석", "분석 플랫폼", "분석플랫폼"]
+        term in text
+        for term in [
+            "aml",
+            "데이터분석",
+            "통계분석",
+            "분석 플랫폼",
+            "분석플랫폼",
+            "통계프로그램",
+            "통계패키지",
+        ]
     )
 
     has_business_fit = has_strong_direct or license_context
 
-    if exclude_score <= -80 and not exact_sas:
+    if exclude_score <= -80 and not exact_sas and not has_strong_direct:
         label = "Exclude"
     elif exact_sas:
         label = "Direct"
     elif has_business_fit and total_score >= 20:
         label = "Direct"
-    elif adjacent_score > 0 or sector_score > 0:
+    elif total_score >= 10 and (
+        adjacent_score > 0
+        or sector_score > 0
+        or "통계시스템" in text
+        or "통계플랫폼" in text
+        or item.get("_source_kind") == "prespec"
+    ):
         label = "Adjacent"
     else:
         label = "Exclude"
@@ -347,12 +425,13 @@ def merge_item(base: dict[str, Any], new_item: dict[str, Any]) -> dict[str, Any]
             merged[field] = new_item[field]
 
     for i in range(1, 11):
-        field = f"ntceSpecFileNm{i}"
-        if not merged.get(field) and new_item.get(field):
-            merged[field] = new_item[field]
-        field = f"ntceSpecDocUrl{i}"
-        if not merged.get(field) and new_item.get(field):
-            merged[field] = new_item[field]
+        file_name_field = f"ntceSpecFileNm{i}"
+        file_url_field = f"ntceSpecDocUrl{i}"
+
+        if not merged.get(file_name_field) and new_item.get(file_name_field):
+            merged[file_name_field] = new_item[file_name_field]
+        if not merged.get(file_url_field) and new_item.get(file_url_field):
+            merged[file_url_field] = new_item[file_url_field]
 
     for i in range(1, 6):
         field = f"specDocFileUrl{i}"
@@ -361,8 +440,12 @@ def merge_item(base: dict[str, Any], new_item: dict[str, Any]) -> dict[str, Any]
 
     if not merged.get("purchsObjPrdctList") and new_item.get("purchsObjPrdctList"):
         merged["purchsObjPrdctList"] = new_item["purchsObjPrdctList"]
+
     if not merged.get("prdctDtlList") and new_item.get("prdctDtlList"):
         merged["prdctDtlList"] = new_item["prdctDtlList"]
+
+    if not merged.get("bidNtceNoList") and new_item.get("bidNtceNoList"):
+        merged["bidNtceNoList"] = new_item["bidNtceNoList"]
 
     return merged
 
@@ -415,6 +498,31 @@ def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
             )
 
     return jobs
+
+
+def attachment_priority(item: dict[str, Any]) -> int:
+    score = int(item.get("_score", 0))
+    text = build_text(item)
+
+    if item.get("_label") == "Direct":
+        score += 20
+
+    if item.get("_source_kind") == "prespec" and item.get("_source_type") == "service":
+        score += 40
+    elif item.get("_source_kind") == "prespec":
+        score += 20
+    elif item.get("_source_kind") == "bid" and item.get("_source_type") == "service":
+        score += 5
+    elif item.get("_source_kind") == "bid" and item.get("_source_type") == "goods":
+        score -= 20
+
+    if str(item.get("swBizObjYn", "")).strip().upper() == "Y":
+        score += 8
+
+    if is_generic_hardware_goods(item, text) and not has_exact_sas(text):
+        score -= 30
+
+    return score
 
 
 def run_bid_ppssrch(
@@ -479,7 +587,6 @@ def collect_bid_notices(
 
     for query_track, keywords in retrieval_plan:
         for keyword in keywords:
-            # 입찰공고 - 물품
             bid_goods_items, bid_goods_resp = run_bid_ppssrch(
                 client=bid_client,
                 endpoint=BID_ENDPOINTS["goods_pps"],
@@ -502,7 +609,6 @@ def collect_bid_notices(
                 }
             )
 
-            # 입찰공고 - 용역
             bid_service_items, bid_service_resp = run_bid_ppssrch(
                 client=bid_client,
                 endpoint=BID_ENDPOINTS["service_pps"],
@@ -525,7 +631,6 @@ def collect_bid_notices(
                 }
             )
 
-            # 사전규격 - 물품
             prespec_goods_items, prespec_goods_resp = run_prespec_ppssrch(
                 client=prespec_client,
                 endpoint=PRESPEC_ENDPOINTS["goods_pps"],
@@ -548,7 +653,6 @@ def collect_bid_notices(
                 }
             )
 
-            # 사전규격 - 용역
             prespec_service_items, prespec_service_resp = run_prespec_ppssrch(
                 client=prespec_client,
                 endpoint=PRESPEC_ENDPOINTS["service_pps"],
@@ -592,10 +696,44 @@ def collect_bid_notices(
     final_items = direct_items + adjacent_items + excluded_items
 
     attachment_jobs: list[dict[str, str]] = []
-    for item in direct_items:
-        attachment_jobs.extend(extract_attachments(item))
-    for item in adjacent_items[:10]:
-        attachment_jobs.extend(extract_attachments(item))
+    selected_ids: set[str] = set()
+
+    def add_attachment_targets(items: list[dict[str, Any]]) -> None:
+        for item in items:
+            record_id = str(item.get("_record_id", ""))
+            if record_id in selected_ids:
+                continue
+            selected_ids.add(record_id)
+            attachment_jobs.extend(extract_attachments(item))
+
+    add_attachment_targets(direct_items)
+
+    prespec_service_adjacent = sorted(
+        [x for x in adjacent_items if x["_source_kind"] == "prespec" and x["_source_type"] == "service"],
+        key=attachment_priority,
+        reverse=True,
+    )[:20]
+    add_attachment_targets(prespec_service_adjacent)
+
+    prespec_goods_adjacent_sw = sorted(
+        [
+            x
+            for x in adjacent_items
+            if x["_source_kind"] == "prespec"
+            and x["_source_type"] == "goods"
+            and str(x.get("swBizObjYn", "")).strip().upper() == "Y"
+        ],
+        key=attachment_priority,
+        reverse=True,
+    )[:8]
+    add_attachment_targets(prespec_goods_adjacent_sw)
+
+    bid_service_adjacent = sorted(
+        [x for x in adjacent_items if x["_source_kind"] == "bid" and x["_source_type"] == "service"],
+        key=attachment_priority,
+        reverse=True,
+    )[:5]
+    add_attachment_targets(bid_service_adjacent)
 
     manifest = {
         "captured_at": datetime.now().isoformat(timespec="seconds"),
@@ -605,6 +743,13 @@ def collect_bid_notices(
         "direct_count": len(direct_items),
         "adjacent_count": len(adjacent_items),
         "exclude_count": len(excluded_items),
+        "attachment_policy": {
+            "direct_all": True,
+            "adjacent_prespec_service_top_n": 20,
+            "adjacent_prespec_goods_sw_top_n": 8,
+            "adjacent_bid_service_top_n": 5,
+            "adjacent_bid_goods": "skip",
+        },
         "calls": manifest_calls,
     }
 

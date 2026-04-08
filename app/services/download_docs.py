@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
@@ -31,6 +30,47 @@ def _guess_suffix_from_url(url: str) -> str:
         if suffix in lowered:
             return suffix
     return ""
+
+
+def _detect_extension_from_bytes(content: bytes) -> str:
+    if content.startswith(b"%PDF"):
+        return ".pdf"
+    if content.startswith(bytes.fromhex("D0CF11E0A1B11AE1")):
+        return ".hwp"
+    if content.startswith(b"PK\x03\x04"):
+        return ".zip"
+    return ""
+
+
+def _extract_filename_from_headers(response: requests.Response) -> str:
+    content_disposition = response.headers.get("Content-Disposition", "")
+    if "filename=" in content_disposition:
+        filename = content_disposition.split("filename=")[-1].strip().strip('"').strip("'")
+        return unquote(filename)
+
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "pdf" in content_type:
+        return "downloaded_file.pdf"
+    if "hwp" in content_type:
+        return "downloaded_file.hwp"
+    if "officedocument.wordprocessingml.document" in content_type:
+        return "downloaded_file.docx"
+    if "msword" in content_type:
+        return "downloaded_file.doc"
+    if "spreadsheetml" in content_type:
+        return "downloaded_file.xlsx"
+    if "ms-excel" in content_type:
+        return "downloaded_file.xls"
+    if "zip" in content_type:
+        return "downloaded_file.zip"
+
+    return ""
+
+
+def _ensure_suffix(file_name: str, suffix: str) -> str:
+    if not suffix or "." in file_name:
+        return file_name
+    return f"{file_name}{suffix}"
 
 
 def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 60) -> list[dict[str, Any]]:
@@ -77,6 +117,9 @@ def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 6
                 header_name = _extract_filename_from_headers(response)
                 if header_name:
                     resolved_name = _safe_name(header_name)
+                else:
+                    detected_ext = _detect_extension_from_bytes(response.content)
+                    resolved_name = _ensure_suffix(file_name, detected_ext)
 
             target_path = target_dir / resolved_name
             target_path.write_bytes(response.content)
@@ -106,27 +149,3 @@ def download_attachments(attachment_jobs: list[dict[str, str]], timeout: int = 6
             )
 
     return results
-
-def _extract_filename_from_headers(response: requests.Response) -> str:
-    content_disposition = response.headers.get("Content-Disposition", "")
-    if "filename=" in content_disposition:
-        filename = content_disposition.split("filename=")[-1].strip().strip('"').strip("'")
-        return unquote(filename)
-
-    content_type = response.headers.get("Content-Type", "").lower()
-    if "pdf" in content_type:
-        return "downloaded_file.pdf"
-    if "hwp" in content_type:
-        return "downloaded_file.hwp"
-    if "officedocument.wordprocessingml.document" in content_type:
-        return "downloaded_file.docx"
-    if "msword" in content_type:
-        return "downloaded_file.doc"
-    if "spreadsheetml" in content_type:
-        return "downloaded_file.xlsx"
-    if "ms-excel" in content_type:
-        return "downloaded_file.xls"
-    if "zip" in content_type:
-        return "downloaded_file.zip"
-
-    return ""
