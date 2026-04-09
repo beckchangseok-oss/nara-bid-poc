@@ -8,6 +8,7 @@ from app.config import Settings, ensure_directories
 from app.db.repository import create_run, finish_run, init_db, insert_notices
 from app.services.collect_notices import collect_bid_notices
 from app.services.download_docs import download_attachments
+from app.services.export_excel import export_run_to_excel
 
 
 def print_section(title: str, items: list[dict], limit: int = 10) -> None:
@@ -106,10 +107,19 @@ def main() -> None:
         )
 
         manifest = load_manifest_summary(raw_json_path)
+        excel_path = export_run_to_excel(
+            notices=notices,
+            download_results=download_results,
+            manifest=manifest,
+            raw_json_path=raw_json_path,
+            total_items=total_items,
+            deduped_items=deduped_items,
+        )
 
         print(f"[SUCCESS] total_items={total_items} deduped_items={deduped_items} final_items={len(notices)}")
         print(f"[ATTACHMENTS] jobs={len(attachment_jobs)} downloaded={downloaded_count} failed={failed_count}")
         print(f"[RAW_JSON] {raw_json_path}")
+        print(f"[EXCEL] {excel_path}")
 
         print_enrich_summary(manifest)
         print_failed_attachments(download_results)
