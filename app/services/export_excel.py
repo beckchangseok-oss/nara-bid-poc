@@ -190,7 +190,37 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
         )
     )
 
-    return build_candidates_rows(review_notices)
+    headers = [
+        "label",
+        "score",
+        "source_kind",
+        "source_type",
+        "title",
+        "pub_org",
+        "close_dt",
+        "query_keywords",
+        "reasons",
+        "bid_detail_url",
+    ]
+
+    rows: list[list[Any]] = []
+    for item in review_notices:
+        rows.append(
+            [
+                _to_text(item.get("_label")),
+                item.get("_score", 0),
+                _to_text(item.get("_source_kind")),
+                _to_text(item.get("_source_type")),
+                _to_text(item.get("_title")),
+                _to_text(item.get("_pub_org")),
+                _to_text(item.get("_close_dt")),
+                _to_text(item.get("_query_keywords")),
+                _to_text(item.get("_reasons")),
+                _to_text(item.get("_bid_detail_url")),
+            ]
+        )
+
+    return headers, rows
 
 
 def build_attachments_rows(download_results: list[dict[str, Any]]) -> tuple[list[str], list[list[Any]]]:
@@ -290,7 +320,7 @@ def export_run_to_excel(
     _write_sheet(review_ws, review_headers, review_rows)
     _apply_label_fill(review_ws, "label")
     _apply_url_links(review_ws, ["bid_detail_url"])
-    
+
     attachments_ws = wb.create_sheet("attachments")
     attachment_headers, attachment_rows = build_attachments_rows(download_results)
     _write_sheet(attachments_ws, attachment_headers, attachment_rows)
