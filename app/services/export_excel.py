@@ -109,6 +109,7 @@ def _write_sheet(ws, headers: list[str], rows: list[list[Any]]) -> None:
 
 def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], list[list[Any]]]:
     headers = [
+        "review_scope",
         "label",
         "score",
         "record_id",
@@ -142,6 +143,7 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
         linked_bid_nos = item.get("_linked_bid_ntce_nos", [])
         rows.append(
             [
+                "Y" if item.get("_label") in {"Direct", "Adjacent"} else "N",
                 _to_text(item.get("_label")),
                 item.get("_score", 0),
                 _to_text(item.get("_record_id")),
