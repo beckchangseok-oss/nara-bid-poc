@@ -201,6 +201,9 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
         "query_keywords",
         "reasons",
         "bid_detail_url",
+        "owner_note",
+        "final_decision",
+        "action_status",
     ]
 
     rows: list[list[Any]] = []
@@ -217,6 +220,9 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
                 _to_text(item.get("_query_keywords")),
                 _to_text(item.get("_reasons")),
                 _to_text(item.get("_bid_detail_url")),
+                "",
+                "",
+                "new",
             ]
         )
 
