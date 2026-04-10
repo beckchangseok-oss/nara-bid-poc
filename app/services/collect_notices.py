@@ -391,6 +391,85 @@ def is_generic_hardware_goods(item: dict[str, Any], text: str) -> bool:
 
     return has_hardware and not has_business_context
 
+def is_cloud_infra_only_project(text: str) -> bool:
+    has_landingzone = ("랜딩존" in text) or ("landing zone" in text) or ("landingzone" in text)
+    has_naver_cloud = ("네이버 클라우드" in text) or ("ncloud" in text) or ("ncp" in text)
+
+    business_terms = [
+        "데이터분석",
+        "데이터 분석",
+        "통계분석",
+        "통계 분석",
+        "통계시스템",
+        "voc 시스템",
+        "cx",
+        "nps",
+        "dxa",
+        "sas",
+        "medallia",
+        "scailium",
+        "samitech",
+        "사미텍",
+    ]
+    has_business_context = any(term in text for term in business_terms)
+
+    return has_landingzone and has_naver_cloud and not has_business_context
+
+
+def is_environmental_vocs_project(text: str) -> bool:
+    if "vocs" not in text:
+        return False
+
+    env_terms = [
+        "장비",
+        "보호장비",
+        "플라스틱 캡",
+        "소음",
+        "측정",
+        "실외",
+        "환경",
+        "환경보건",
+        "ni-52",
+        "octave",
+        "sound level meter",
+    ]
+    return any(term in text for term in env_terms)
+
+
+def is_generic_ai_tooling_project(item: dict[str, Any], text: str) -> bool:
+    if item.get("_source_kind") != "bid":
+        return False
+    if item.get("_source_type") != "goods":
+        return False
+
+    has_labeling = ("라벨링" in text) or ("labeling" in text)
+    has_authoring = ("저작도구" in text) or ("annotation" in text)
+    has_sw = ("sw" in text) or ("소프트웨어" in text)
+
+    has_axis = has_exact_sas(text) or any(
+        term in text for term in ["medallia", "scailium", "samitech", "사미텍"]
+    )
+
+    return has_labeling and has_authoring and has_sw and not has_axis
+
+def is_industrial_ai_validation_project(text: str) -> bool:
+    has_cnc = "cnc" in text
+    has_aircraft_part = ("항공 부품" in text) or ("항공부품" in text)
+    has_human_error = "휴먼에러" in text
+    has_realtime_validation = ("실시간 검증 시스템" in text) or ("실시간검증시스템" in text)
+    has_demo = "실증" in text
+
+    has_axis = has_exact_sas(text) or any(
+        term in text for term in ["medallia", "scailium", "samitech", "사미텍"]
+    )
+
+    return (
+        not has_axis
+        and has_cnc
+        and has_aircraft_part
+        and (has_human_error or has_realtime_validation)
+        and has_demo
+    )
 
 def build_bid_ppssrch_params(keyword: str, start_dt: str, end_dt: str) -> dict[str, Any]:
     return {
@@ -502,6 +581,10 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     bid_service_adjacent_context = has_bid_service_adjacent_context(item, text)
     generic_sw_hits = count_generic_software_hits(text)
     generic_hw_goods = is_generic_hardware_goods(item, text)
+    cloud_infra_only = is_cloud_infra_only_project(text)
+    environmental_vocs = is_environmental_vocs_project(text)
+    generic_ai_tooling = is_generic_ai_tooling_project(item, text)
+    industrial_ai_validation = is_industrial_ai_validation_project(text)
 
     if exact_sas:
         total_score += 50
@@ -540,6 +623,21 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     if generic_hw_goods and not exact_sas:
         total_score -= 35
         reasons.append("GENERIC_HARDWARE_GOODS=Y")
+    if cloud_infra_only:
+        total_score -= 40
+        reasons.append("GENERIC_CLOUD_INFRA=Y")
+
+    if environmental_vocs:
+        total_score -= 60
+        reasons.append("ENVIRONMENTAL_VOCS=Y")
+
+    if generic_ai_tooling:
+        total_score -= 40
+        reasons.append("GENERIC_AI_TOOLING=Y")
+
+    if industrial_ai_validation:
+        total_score -= 50
+        reasons.append("INDUSTRIAL_AI_VALIDATION=Y")    
 
     if axis_hits:
         reasons.append(f"AXIS={','.join(axis_hits[:5])}")
