@@ -175,6 +175,23 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
 
     return headers, rows
 
+def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], list[list[Any]]]:
+    review_notices = [
+        x for x in notices
+        if x.get("_label") in {"Direct", "Adjacent"}
+    ]
+
+    label_order = {"Direct": 0, "Adjacent": 1}
+    review_notices.sort(
+        key=lambda x: (
+            label_order.get(str(x.get("_label", "")), 99),
+            -int(x.get("_score", 0)),
+            str(x.get("_record_id", "")),
+        )
+    )
+
+    return build_candidates_rows(review_notices)
+
 
 def build_attachments_rows(download_results: list[dict[str, Any]]) -> tuple[list[str], list[list[Any]]]:
     headers = [
@@ -268,6 +285,12 @@ def export_run_to_excel(
     _apply_label_fill(candidates_ws, "label")
     _apply_url_links(candidates_ws, ["bid_detail_url"])
 
+    review_ws = wb.create_sheet("review_candidates")
+    review_headers, review_rows = build_review_candidates_rows(notices)
+    _write_sheet(review_ws, review_headers, review_rows)
+    _apply_label_fill(review_ws, "label")
+    _apply_url_links(review_ws, ["bid_detail_url"])
+    
     attachments_ws = wb.create_sheet("attachments")
     attachment_headers, attachment_rows = build_attachments_rows(download_results)
     _write_sheet(attachments_ws, attachment_headers, attachment_rows)
