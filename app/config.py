@@ -41,6 +41,8 @@ class Settings:
     page_size: int
     lookback_days: int
     request_timeout: int
+    start_dt_override: str
+    end_dt_override: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -51,6 +53,8 @@ class Settings:
         page_size = int(os.getenv("PAGE_SIZE", "50").strip())
         lookback_days = int(os.getenv("LOOKBACK_DAYS", "7").strip())
         request_timeout = int(os.getenv("REQUEST_TIMEOUT", "30").strip())
+        start_dt_override = os.getenv("START_DT", "").strip()
+        end_dt_override = os.getenv("END_DT", "").strip()
 
         missing: list[str] = []
         if not bid_service_key:
@@ -73,4 +77,6 @@ class Settings:
             page_size=page_size,
             lookback_days=lookback_days,
             request_timeout=request_timeout,
+            start_dt_override=start_dt_override,
+            end_dt_override=end_dt_override,
         )

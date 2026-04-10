@@ -181,6 +181,20 @@ def get_default_date_range(lookback_days: int) -> tuple[str, str]:
     end = now.replace(hour=23, minute=59, second=0, microsecond=0)
     return start.strftime("%Y%m%d%H%M"), end.strftime("%Y%m%d%H%M")
 
+def resolve_date_range(settings: Settings) -> tuple[str, str, str]:
+    start_dt = settings.start_dt_override
+    end_dt = settings.end_dt_override
+
+    if start_dt or end_dt:
+        if not start_dt or not end_dt:
+            raise ValueError("START_DT, END_DT는 둘 다 같이 입력해야 함")
+        if len(start_dt) != 12 or len(end_dt) != 12:
+            raise ValueError("START_DT, END_DT 형식은 YYYYMMDDHHMM 이어야 함")
+        return start_dt, end_dt, "fixed_override"
+
+    start_dt, end_dt = get_default_date_range(settings.lookback_days)
+    return start_dt, end_dt, "lookback_days"
+
 
 def save_json(payload: dict[str, Any], filename: str) -> str:
     path = RAW_DIR / filename
@@ -276,6 +290,42 @@ def get_procurement_hits(text: str) -> list[str]:
 
 def has_procurement_context(text: str) -> bool:
     return len(get_procurement_hits(text)) > 0
+def get_bid_detail_url(item: dict[str, Any]) -> str:
+    return str(
+        item.get("_detail_url")
+        or item.get("bidNtceDtlUrl")
+        or item.get("bidNtceUrl")
+        or ""
+    ).strip()
+
+
+def annotate_detail_url_policy(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    annotated: list[dict[str, Any]] = []
+
+    for item in items:
+        enriched = dict(item)
+
+        bid_detail_url = get_bid_detail_url(enriched)
+        linked_bid_nos = enriched.get("_linked_bid_ntce_nos") or extract_bid_ntce_numbers(enriched)
+
+        if enriched.get("_source_kind") == "bid":
+            if bid_detail_url:
+                missing_reason = "BID_DETAIL_URL_AVAILABLE"
+            else:
+                missing_reason = "BID_DETAIL_URL_MISSING"
+        else:
+            if bid_detail_url:
+                missing_reason = "BID_DETAIL_URL_AVAILABLE"
+            elif linked_bid_nos:
+                missing_reason = "LINKED_BID_NOT_FOUND"
+            else:
+                missing_reason = "PRESPEC_NO_NATIVE_DETAIL_URL"
+
+        enriched["_bid_detail_url"] = bid_detail_url
+        enriched["_detail_url_missing_reason"] = missing_reason
+        annotated.append(enriched)
+
+    return annotated
 
 def has_bid_service_adjacent_context(item: dict[str, Any], text: str) -> bool:
     if item.get("_source_kind") != "bid":
@@ -921,7 +971,7 @@ def run_prespec_ppssrch(
 def collect_bid_notices(
     settings: Settings,
 ) -> tuple[list[dict[str, Any]], str, list[dict[str, str]], int, int]:
-    start_dt, end_dt = get_default_date_range(settings.lookback_days)
+    start_dt, end_dt, date_range_source = resolve_date_range(settings)
 
     bid_client = PublicApiClient(
         service_key=settings.bid_service_key,
@@ -1098,6 +1148,7 @@ def collect_bid_notices(
     add_attachment_targets(bid_service_adjacent)
 
     final_items = annotate_attachment_diagnostics(final_items, selected_ids)
+    final_items = annotate_detail_url_policy(final_items)
 
     manifest = {
         "captured_at": datetime.now().isoformat(timespec="seconds"),
@@ -1120,8 +1171,14 @@ def collect_bid_notices(
             "adjacent_bid_service_top_n": 5,
             "adjacent_bid_goods": "skip",
         },
+        "attachments_scope": "selected_download_targets_only",
+        "detail_url_policy": "bid_only_or_enriched_bid",
+        "classification_policy_version": "direct_axis_plus_procurement_v2",
         "calls": manifest_calls,
         "prespec_bid_enrichment_logs": enrich_logs,
+        "date_range_source": date_range_source,
+        "lookback_days": settings.lookback_days,
+        
     }
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

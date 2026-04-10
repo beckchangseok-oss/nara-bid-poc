@@ -124,7 +124,8 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
         "linked_bid_count",
         "linked_bid_ntce_nos",
         "bidNtceNoList",
-        "detail_url",
+        "bid_detail_url",
+        "detail_url_missing_reason",
         "swBizObjYn",
         "purchsObjPrdctList",
         "prdctDtlList",
@@ -156,7 +157,8 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
                 len(linked_bid_nos),
                 _to_text(linked_bid_nos),
                 _to_text(item.get("bidNtceNoList")),
-                _to_text(item.get("_detail_url") or item.get("bidNtceDtlUrl") or item.get("bidNtceUrl")),
+                _to_text(item.get("_bid_detail_url")),
+                _to_text(item.get("_detail_url_missing_reason")),
                 _to_text(item.get("swBizObjYn")),
                 _to_text(item.get("purchsObjPrdctList")),
                 _to_text(item.get("prdctDtlList")),
@@ -235,6 +237,11 @@ def build_summary_rows(
         ["enrich_error", enrich_summary.get("error", 0)],
         ["range_start_dt", _to_text(manifest.get("range", {}).get("start_dt"))],
         ["range_end_dt", _to_text(manifest.get("range", {}).get("end_dt"))],
+        ["attachments_scope", _to_text(manifest.get("attachments_scope"))],
+        ["detail_url_policy", _to_text(manifest.get("detail_url_policy"))],
+        ["classification_policy_version", _to_text(manifest.get("classification_policy_version"))],
+        ["date_range_source", _to_text(manifest.get("date_range_source"))],
+        ["lookback_days", _to_text(manifest.get("lookback_days"))],
     ]
     return rows
 
@@ -257,7 +264,7 @@ def export_run_to_excel(
     candidate_headers, candidate_rows = build_candidates_rows(notices)
     _write_sheet(candidates_ws, candidate_headers, candidate_rows)
     _apply_label_fill(candidates_ws, "label")
-    _apply_url_links(candidates_ws, ["detail_url"])
+    _apply_url_links(candidates_ws, ["bid_detail_url"])
 
     attachments_ws = wb.create_sheet("attachments")
     attachment_headers, attachment_rows = build_attachments_rows(download_results)
