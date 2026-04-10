@@ -34,19 +34,10 @@ ADJACENT_QUERY_KEYWORDS = [
 
 DIRECT_SCORE_MAP = {
     "aml": 35,
-    "통계": 14,
-    "통계분석": 22,
-    "데이터분석": 22,
-    "통계패키지": 18,
-    "통계프로그램": 18,
-    "분석 플랫폼": 16,
-    "분석플랫폼": 16,
-    "csv": 10,
-    "리뉴얼": 10,
-    "renewal": 10,
-    "교육": 4,
-    "운영": 4,
-    "위탁": 4,
+    "medallia": 30,
+    "scailium": 30,
+    "samitech": 30,
+    "사미텍": 30,
 }
 
 ADJACENT_SCORE_MAP = {
@@ -72,6 +63,20 @@ ADJACENT_SCORE_MAP = {
     "db 구축": 10,
     "분석 서버": 10,
     "서버 전환": 12,
+    "통계": 8,
+    "통계분석": 10,
+    "통계 분석": 10,
+    "데이터분석": 10,
+    "데이터 분석": 10,
+    "분석 플랫폼": 10,
+    "분석플랫폼": 10,
+    "분석사업": 10,
+    "분석 사업": 10,
+    "통계패키지": 8,
+    "통계프로그램": 8,
+    "spss": 8,
+    "운영": 4,
+    "감리": 6,
 }
 
 SECTOR_SCORE_MAP = {
@@ -119,30 +124,22 @@ EXCLUDE_SCORE_MAP = {
     "acrobat": -25,
 }
 
-DIRECT_STRONG_TERMS = [
+DIRECT_AXIS_TERMS = [
+    "sas",
     "aml",
-    "데이터분석",
-    "데이터 분석",
-    "통계분석",
-    "통계 분석",
-    "분석 플랫폼",
-    "분석플랫폼",
-    "통계프로그램",
-    "통계패키지",
+    "medallia",
+    "scailium",
+    "samitech",
+    "사미텍",
 ]
 
 DIRECT_LICENSE_TERMS = [
     "sas",
     "aml",
-    "데이터분석",
-    "데이터 분석",
-    "통계분석",
-    "통계 분석",
-    "분석 플랫폼",
-    "분석플랫폼",
-    "통계프로그램",
-    "통계패키지",
-    "csv",
+    "medallia",
+    "scailium",
+    "samitech",
+    "사미텍",
 ]
 
 ADJACENT_LICENSE_TERMS = [
@@ -165,6 +162,17 @@ BID_SERVICE_ADJACENT_TERMS = [
     "db 구축",
     "고도화",
 ]
+
+PROCUREMENT_TERMS = [
+    "라이선스",
+    "임차",
+    "구매",
+    "리뉴얼",
+    "renewal",
+    "소프트웨어",
+    "software",
+]
+
 
 
 def get_default_date_range(lookback_days: int) -> tuple[str, str]:
@@ -241,6 +249,33 @@ def has_direct_license_context(text: str) -> bool:
 def has_adjacent_license_context(text: str) -> bool:
     return has_contextual_license_match(text, ADJACENT_LICENSE_TERMS)
 
+def get_axis_hits(text: str, exact_sas: bool) -> list[str]:
+    hits: list[str] = []
+
+    if exact_sas:
+        hits.append("sas")
+
+    for term in DIRECT_AXIS_TERMS:
+        if term == "sas":
+            continue
+        if term in text and term not in hits:
+            hits.append(term)
+
+    return hits
+
+
+def get_procurement_hits(text: str) -> list[str]:
+    hits: list[str] = []
+
+    for term in PROCUREMENT_TERMS:
+        if term in text and term not in hits:
+            hits.append(term)
+
+    return hits
+
+
+def has_procurement_context(text: str) -> bool:
+    return len(get_procurement_hits(text)) > 0
 
 def has_bid_service_adjacent_context(item: dict[str, Any], text: str) -> bool:
     if item.get("_source_kind") != "bid":
@@ -409,6 +444,9 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
 
     exact_sas = has_exact_sas(text)
+    axis_hits = get_axis_hits(text, exact_sas=exact_sas)
+    procurement_hits = get_procurement_hits(text)
+
     direct_license_context = has_direct_license_context(text)
     adjacent_license_context = has_adjacent_license_context(text)
     bid_service_adjacent_context = has_bid_service_adjacent_context(item, text)
@@ -453,8 +491,10 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
         total_score -= 35
         reasons.append("GENERIC_HARDWARE_GOODS=Y")
 
-    if direct_hits:
-        reasons.append(f"DIRECT={','.join(direct_hits[:5])}")
+    if axis_hits:
+        reasons.append(f"AXIS={','.join(axis_hits[:5])}")
+    if procurement_hits:
+        reasons.append(f"PROCUREMENT={','.join(procurement_hits[:5])}")
     if adjacent_hits:
         reasons.append(f"ADJ={','.join(adjacent_hits[:5])}")
     if sector_hits:
@@ -462,7 +502,14 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
     if exclude_hits:
         reasons.append(f"EXCLUDE={','.join(exclude_hits[:5])}")
 
-    has_strong_direct = exact_sas or any(term in text for term in DIRECT_STRONG_TERMS)
+    has_axis_term = len(axis_hits) > 0
+    has_procurement = len(procurement_hits) > 0
+
+    has_explicit_direct_evidence = (
+        exact_sas
+        or direct_license_context
+        or (has_axis_term and has_procurement)
+    )
 
     has_adjacent_business = (
         adjacent_score > 0
@@ -472,11 +519,9 @@ def classify_notice(item: dict[str, Any]) -> dict[str, Any]:
         or item.get("_source_kind") == "prespec"
     )
 
-    if exclude_score <= -80 and not exact_sas and not has_strong_direct:
+    if exclude_score <= -80 and not has_explicit_direct_evidence:
         label = "Exclude"
-    elif exact_sas:
-        label = "Direct"
-    elif has_strong_direct and (direct_license_context or total_score >= 25):
+    elif has_explicit_direct_evidence:
         label = "Direct"
     elif total_score >= 10 and has_adjacent_business:
         label = "Adjacent"
@@ -691,6 +736,7 @@ def enrich_prespec_with_bid_details(
 
 
 def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
+    
     jobs: list[dict[str, str]] = []
     record_id = str(item.get("_record_id", "")).strip()
 
@@ -739,6 +785,73 @@ def extract_attachments(item: dict[str, Any]) -> list[dict[str, str]]:
             )
 
     return jobs
+def count_bid_attachment_urls(item: dict[str, Any]) -> int:
+    return sum(
+        1
+        for i in range(1, 11)
+        if str(item.get(f"ntceSpecDocUrl{i}", "")).strip()
+    )
+
+
+def count_prespec_attachment_urls(item: dict[str, Any]) -> int:
+    return sum(
+        1
+        for i in range(1, 6)
+        if str(item.get(f"specDocFileUrl{i}", "")).strip()
+    )
+
+
+def detect_attachment_source(item: dict[str, Any]) -> str:
+    has_bid = count_bid_attachment_urls(item) > 0
+    has_prespec = count_prespec_attachment_urls(item) > 0
+
+    if has_bid and has_prespec:
+        return "bid+prespec"
+    if has_bid:
+        return "bid"
+    if has_prespec:
+        return "prespec"
+    return "none"
+
+
+def annotate_attachment_diagnostics(
+    items: list[dict[str, Any]],
+    selected_ids: set[str],
+) -> list[dict[str, Any]]:
+    annotated: list[dict[str, Any]] = []
+
+    for item in items:
+        enriched = dict(item)
+
+        bid_attachment_count = count_bid_attachment_urls(enriched)
+        prespec_attachment_count = count_prespec_attachment_urls(enriched)
+        source_attachment_count = bid_attachment_count + prespec_attachment_count
+
+        attachment_jobs = extract_attachments(enriched)
+        attachment_job_count = len(attachment_jobs)
+
+        record_id = str(enriched.get("_record_id", "")).strip()
+        attachment_selected = record_id in selected_ids
+
+        if source_attachment_count == 0:
+            missing_reason = "NO_URL_IN_SOURCE"
+        elif attachment_job_count == 0:
+            missing_reason = "EXTRACT_LOGIC_MISS"
+        elif not attachment_selected:
+            missing_reason = "NOT_SELECTED_BY_POLICY"
+        else:
+            missing_reason = ""
+
+        enriched["_bid_attachment_count"] = bid_attachment_count
+        enriched["_prespec_attachment_count"] = prespec_attachment_count
+        enriched["_attachment_job_count"] = attachment_job_count
+        enriched["_attachment_detected_from"] = detect_attachment_source(enriched)
+        enriched["_attachment_selected"] = "Y" if attachment_selected else "N"
+        enriched["_attachment_missing_reason"] = missing_reason
+
+        annotated.append(enriched)
+
+    return annotated
 
 
 def attachment_priority(item: dict[str, Any]) -> int:
@@ -983,6 +1096,8 @@ def collect_bid_notices(
         reverse=True,
     )[:5]
     add_attachment_targets(bid_service_adjacent)
+
+    final_items = annotate_attachment_diagnostics(final_items, selected_ids)
 
     manifest = {
         "captured_at": datetime.now().isoformat(timespec="seconds"),

@@ -128,6 +128,12 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
         "swBizObjYn",
         "purchsObjPrdctList",
         "prdctDtlList",
+        "bid_attachment_count",
+        "prespec_attachment_count",
+        "attachment_job_count",
+        "attachment_detected_from",
+        "attachment_selected",
+        "attachment_missing_reason",
     ]
 
     rows: list[list[Any]] = []
@@ -154,6 +160,12 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
                 _to_text(item.get("swBizObjYn")),
                 _to_text(item.get("purchsObjPrdctList")),
                 _to_text(item.get("prdctDtlList")),
+                item.get("_bid_attachment_count", 0),
+                item.get("_prespec_attachment_count", 0),
+                item.get("_attachment_job_count", 0),
+                _to_text(item.get("_attachment_detected_from")),
+                _to_text(item.get("_attachment_selected")),
+                _to_text(item.get("_attachment_missing_reason")),
             ]
         )
 
