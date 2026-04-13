@@ -7,6 +7,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.config import OUTPUT_DIR
 
@@ -21,9 +22,13 @@ HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 DIRECT_FILL = PatternFill("solid", fgColor="E2F0D9")
 ADJACENT_FILL = PatternFill("solid", fgColor="FFF2CC")
 EXCLUDE_FILL = PatternFill("solid", fgColor="F4CCCC")
+INPUT_FILL = PatternFill("solid", fgColor="EAF2F8")
 LINK_FONT = Font(color="0563C1", underline="single")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 BODY_FONT = Font(color="000000", bold=False)
+
+FINAL_DECISION_OPTIONS = ["Direct", "Adjacent", "Exclude", "Hold"]
+ACTION_STATUS_OPTIONS = ["new", "reviewed", "need_spec_check", "need_biz_check", "closed"]
 
 
 def _to_text(value: Any) -> str:
@@ -95,6 +100,39 @@ def _apply_url_links(ws, header_names: list[str]) -> None:
             if value.startswith("http://") or value.startswith("https://"):
                 cell.hyperlink = value
                 cell.font = LINK_FONT
+
+
+def _highlight_input_columns(ws, header_names: list[str]) -> None:
+    header_map = {cell.value: idx + 1 for idx, cell in enumerate(ws[1])}
+
+    for header_name in header_names:
+        col_idx = header_map.get(header_name)
+        if not col_idx:
+            continue
+
+        for row_idx in range(2, ws.max_row + 1):
+            ws.cell(row=row_idx, column=col_idx).fill = INPUT_FILL
+
+
+def _add_dropdown_validation(ws, header_name: str, options: list[str]) -> None:
+    header_map = {cell.value: idx + 1 for idx, cell in enumerate(ws[1])}
+    col_idx = header_map.get(header_name)
+    if not col_idx:
+        return
+
+    last_row = max(ws.max_row, 1000)
+    formula = '"' + ",".join(options) + '"'
+    validation = DataValidation(
+        type="list",
+        formula1=formula,
+        allow_blank=True,
+    )
+    validation.error = "허용된 값만 입력 가능"
+    validation.errorTitle = "입력값 오류"
+    validation.prompt = "목록에서 값을 선택"
+    validation.promptTitle = header_name
+    ws.add_data_validation(validation)
+    validation.add(f"{get_column_letter(col_idx)}2:{get_column_letter(col_idx)}{last_row}")
 
 
 def _write_sheet(ws, headers: list[str], rows: list[list[Any]]) -> None:
@@ -175,6 +213,7 @@ def build_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], lis
 
     return headers, rows
 
+
 def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[str], list[list[Any]]]:
     review_notices = [
         x for x in notices
@@ -191,7 +230,11 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
     )
 
     headers = [
-        "label",
+        "review_item_key",
+        "original_label",
+        "final_decision",
+        "action_status",
+        "owner_note",
         "score",
         "source_kind",
         "source_type",
@@ -201,16 +244,17 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
         "query_keywords",
         "reasons",
         "bid_detail_url",
-        "owner_note",
-        "final_decision",
-        "action_status",
     ]
 
     rows: list[list[Any]] = []
     for item in review_notices:
         rows.append(
             [
+                _to_text(item.get("_record_id")),
                 _to_text(item.get("_label")),
+                "",
+                "new",
+                "",
                 item.get("_score", 0),
                 _to_text(item.get("_source_kind")),
                 _to_text(item.get("_source_type")),
@@ -220,9 +264,6 @@ def build_review_candidates_rows(notices: list[dict[str, Any]]) -> tuple[list[st
                 _to_text(item.get("_query_keywords")),
                 _to_text(item.get("_reasons")),
                 _to_text(item.get("_bid_detail_url")),
-                "",
-                "",
-                "new",
             ]
         )
 
@@ -324,8 +365,11 @@ def export_run_to_excel(
     review_ws = wb.create_sheet("review_candidates")
     review_headers, review_rows = build_review_candidates_rows(notices)
     _write_sheet(review_ws, review_headers, review_rows)
-    _apply_label_fill(review_ws, "label")
+    _apply_label_fill(review_ws, "original_label")
     _apply_url_links(review_ws, ["bid_detail_url"])
+    _highlight_input_columns(review_ws, ["final_decision", "action_status", "owner_note"])
+    _add_dropdown_validation(review_ws, "final_decision", FINAL_DECISION_OPTIONS)
+    _add_dropdown_validation(review_ws, "action_status", ACTION_STATUS_OPTIONS)
 
     attachments_ws = wb.create_sheet("attachments")
     attachment_headers, attachment_rows = build_attachments_rows(download_results)
