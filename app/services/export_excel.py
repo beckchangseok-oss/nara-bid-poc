@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -29,6 +29,97 @@ BODY_FONT = Font(color="000000", bold=False)
 
 FINAL_DECISION_OPTIONS = ["Direct", "Adjacent", "Exclude", "Hold"]
 ACTION_STATUS_OPTIONS = ["new", "reviewed", "need_spec_check", "need_biz_check", "closed"]
+
+
+def _normalize_key(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _find_latest_output_excel() -> Path | None:
+    xlsx_files = sorted(OUTPUT_DIR.glob("day2_candidates_*.xlsx"))
+    if not xlsx_files:
+        return None
+    return xlsx_files[-1]
+
+
+def _load_previous_review_values(path: Path | None) -> tuple[str, dict[str, dict[str, str]]]:
+    if path is None or not path.exists():
+        return "", {}
+
+    try:
+        wb = load_workbook(path, read_only=True, data_only=True)
+    except Exception:
+        return str(path), {}
+
+    try:
+        if "review_candidates" not in wb.sheetnames:
+            return str(path), {}
+
+        ws = wb["review_candidates"]
+        header_values = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
+        if not header_values:
+            return str(path), {}
+
+        header_map = {str(value).strip(): idx for idx, value in enumerate(header_values) if value}
+        key_idx = header_map.get("review_item_key")
+        if key_idx is None:
+            key_idx = header_map.get("record_id")
+        if key_idx is None:
+            return str(path), {}
+
+        final_decision_idx = header_map.get("final_decision")
+        action_status_idx = header_map.get("action_status")
+        owner_note_idx = header_map.get("owner_note")
+
+        review_map: dict[str, dict[str, str]] = {}
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            key = _normalize_key(row[key_idx] if key_idx < len(row) else "")
+            if not key:
+                continue
+
+            review_map[key] = {
+                "final_decision": _normalize_key(row[final_decision_idx]) if final_decision_idx is not None and final_decision_idx < len(row) else "",
+                "action_status": _normalize_key(row[action_status_idx]) if action_status_idx is not None and action_status_idx < len(row) else "",
+                "owner_note": _normalize_key(row[owner_note_idx]) if owner_note_idx is not None and owner_note_idx < len(row) else "",
+            }
+
+        return str(path), review_map
+    finally:
+        wb.close()
+
+
+def _apply_review_carry_forward(
+    rows: list[list[Any]],
+    headers: list[str],
+    previous_review_map: dict[str, dict[str, str]],
+) -> int:
+    if not rows or not previous_review_map:
+        return 0
+
+    header_map = {name: idx for idx, name in enumerate(headers)}
+    key_idx = header_map["review_item_key"]
+    final_decision_idx = header_map["final_decision"]
+    action_status_idx = header_map["action_status"]
+    owner_note_idx = header_map["owner_note"]
+
+    applied_count = 0
+    for row in rows:
+        review_key = _normalize_key(row[key_idx])
+        if not review_key:
+            continue
+
+        previous = previous_review_map.get(review_key)
+        if not previous:
+            continue
+
+        row[final_decision_idx] = previous.get("final_decision", "")
+        row[action_status_idx] = previous.get("action_status", "") or "new"
+        row[owner_note_idx] = previous.get("owner_note", "")
+
+        if previous.get("final_decision") or previous.get("action_status") or previous.get("owner_note"):
+            applied_count += 1
+
+    return applied_count
 
 
 def _to_text(value: Any) -> str:
@@ -305,6 +396,8 @@ def build_summary_rows(
     deduped_items: int,
     notices: list[dict[str, Any]],
     download_results: list[dict[str, Any]],
+    review_carry_forward_source: str,
+    review_carry_forward_applied: int,
 ) -> list[list[Any]]:
     direct_count = sum(1 for x in notices if x.get("_label") == "Direct")
     adjacent_count = sum(1 for x in notices if x.get("_label") == "Adjacent")
@@ -338,6 +431,8 @@ def build_summary_rows(
         ["classification_policy_version", _to_text(manifest.get("classification_policy_version"))],
         ["date_range_source", _to_text(manifest.get("date_range_source"))],
         ["lookback_days", _to_text(manifest.get("lookback_days"))],
+        ["review_carry_forward_source", _to_text(review_carry_forward_source)],
+        ["review_carry_forward_applied", review_carry_forward_applied],
     ]
     return rows
 
@@ -362,8 +457,15 @@ def export_run_to_excel(
     _apply_label_fill(candidates_ws, "label")
     _apply_url_links(candidates_ws, ["bid_detail_url"])
 
+    previous_review_source, previous_review_map = _load_previous_review_values(_find_latest_output_excel())
+
     review_ws = wb.create_sheet("review_candidates")
     review_headers, review_rows = build_review_candidates_rows(notices)
+    review_carry_forward_applied = _apply_review_carry_forward(
+        rows=review_rows,
+        headers=review_headers,
+        previous_review_map=previous_review_map,
+    )
     _write_sheet(review_ws, review_headers, review_rows)
     _apply_label_fill(review_ws, "original_label")
     _apply_url_links(review_ws, ["bid_detail_url"])
@@ -385,6 +487,8 @@ def export_run_to_excel(
         deduped_items=deduped_items,
         notices=notices,
         download_results=download_results,
+        review_carry_forward_source=previous_review_source,
+        review_carry_forward_applied=review_carry_forward_applied,
     ):
         summary_ws.append(row)
 
